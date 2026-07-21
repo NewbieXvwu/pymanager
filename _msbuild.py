@@ -64,6 +64,26 @@ class ResourceFile(CSourceFile):
 CPP_SETTINGS = ItemDefinition('ClCompile', LanguageStandard='stdcpp20')
 
 
+# Maximum optimization for release builds. Skipped for Debug so local
+# debugging still works. Adds whole-program optimization (/GL + /LTCG),
+# aggressive inlining and intrinsics, and dead-code/COMDAT folding at link.
+_RELEASE_ONLY = "'$(Configuration)' != 'Debug'"
+
+OPTIMIZE_COMPILE = ItemDefinition('ClCompile',
+    Optimization=ConditionalValue('Full', condition=_RELEASE_ONLY),
+    WholeProgramOptimization=ConditionalValue('true', condition=_RELEASE_ONLY),
+    InlineFunctionExpansion=ConditionalValue('AnySuitable', condition=_RELEASE_ONLY),
+    IntrinsicFunctions=ConditionalValue('true', condition=_RELEASE_ONLY),
+    FavorSizeOrSpeed=ConditionalValue('Speed', condition=_RELEASE_ONLY),
+)
+
+OPTIMIZE_LINK = ItemDefinition('Link',
+    LinkTimeCodeGeneration=ConditionalValue('UseLinkTimeCodeGeneration', condition=_RELEASE_ONLY),
+    OptimizeReferences=ConditionalValue('true', condition=_RELEASE_ONLY),
+    EnableCOMDATFolding=ConditionalValue('true', condition=_RELEASE_ONLY),
+)
+
+
 # AdditionalIncludes will be set during init_PACKAGE
 INCLUDE_TMPDIR = ItemDefinition("ClCompile")
 
@@ -82,6 +102,8 @@ NATIVE_PYD = DllPackage(
     VersionInfo(FileDescription="Native helper functions for PyManager"),
     PyFile('__init__.py'),
     CPP_SETTINGS,
+    OPTIMIZE_COMPILE,
+    OPTIMIZE_LINK,
     ItemDefinition("Link",
         AdditionalDependencies=Prepend("wintrust.lib;"),
     ),
@@ -126,12 +148,14 @@ def main_exe(name):
     return CProject(name,
         VersionInfo(FileDescription="Python Install Manager"),
         CPP_SETTINGS,
+        OPTIMIZE_COMPILE,
         ItemDefinition('ClCompile', PreprocessorDefinitions=Prepend(f'EXE_NAME=L"{name}";')),
         ItemDefinition('Link',
             SubSystem='CONSOLE',
             DelayLoadDLLs=f'{DLL_NAME}.dll;ole32.dll;shell32.dll;advapi32.dll',
             AdditionalOptions=Prepend('/IGNORE:4199 '),
         ),
+        OPTIMIZE_LINK,
         INCLUDE_TMPDIR,
         Manifest('default.manifest'),
         ResourceFile('pyicon.rc'),
@@ -149,11 +173,13 @@ def mainw_exe(name):
     return CProject(name,
         VersionInfo(FileDescription="Python Install Manager (windowed)"),
         CPP_SETTINGS,
+        OPTIMIZE_COMPILE,
         ItemDefinition('Link',
             SubSystem='WINDOWS',
             DelayLoadDLLs=f'{DLL_NAME}.dll;ole32.dll;shell32.dll;advapi32.dll',
             AdditionalOptions=Prepend('/IGNORE:4199 '),
         ),
+        OPTIMIZE_LINK,
         INCLUDE_TMPDIR,
         ItemDefinition('ClCompile', PreprocessorDefinitions=Prepend(f'EXE_NAME=L"{name}";')),
         ItemDefinition('ClCompile', PreprocessorDefinitions=Prepend("PY_WINDOWED=1;")),
@@ -176,8 +202,10 @@ def launcher_exe(name, platform):
             OriginalFilename=f"{name}.exe"
         ),
         CPP_SETTINGS,
+        OPTIMIZE_COMPILE,
         Property('StaticLibcppLinkage', 'true'),
         ItemDefinition('Link', SubSystem='CONSOLE'),
+        OPTIMIZE_LINK,
         Manifest('default.manifest'),
         ResourceFile('pyicon.rc'),
         CSourceFile('launcher.cpp'),
@@ -196,9 +224,11 @@ def launcherw_exe(name, platform):
             OriginalFilename=f"{name}.exe"
         ),
         CPP_SETTINGS,
+        OPTIMIZE_COMPILE,
         ItemDefinition('ClCompile', PreprocessorDefinitions=Prepend("PY_WINDOWED=1;")),
         Property('StaticLibcppLinkage', 'true'),
         ItemDefinition('Link', SubSystem='WINDOWS'),
+        OPTIMIZE_LINK,
         Manifest('default.manifest'),
         ResourceFile('pywicon.rc'),
         CSourceFile('launcher.cpp'),
@@ -225,7 +255,9 @@ def pyshellext(ext='.exe', **props):
             OriginalFilename=f'pyshellext{ext}',
         ),
         ItemDefinition('ClCompile', LanguageStandard='stdcpp20'),
+        OPTIMIZE_COMPILE,
         link_opts,
+        OPTIMIZE_LINK,
         Manifest('default.manifest'),
         CSourceFile('shellext.cpp'),
         ResourceFile('pyshellext.rc'),
