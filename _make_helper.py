@@ -60,7 +60,19 @@ def get_sdk_bins():
 
     sdk_ver = os.getenv("WindowsSDKVersion", "10.*")
 
-    bins = list((sdk / "bin").glob(sdk_ver))[-1] / "x64"
+    bin_root = list((sdk / "bin").glob(sdk_ver))[-1]
+
+    # Prefer SDK tools matching the host architecture, but fall back to the x64
+    # tools (which run under emulation on ARM64) when they aren't available.
+    import platform
+    host = platform.machine().lower()
+    arch_order = ["arm64", "x64"] if host in ("arm64", "aarch64") else ["x64"]
+    for arch in arch_order:
+        bins = bin_root / arch
+        if (bins / "makeappx.exe").is_file():
+            return bins
+
+    bins = bin_root / "x64"
     if not bins.is_dir():
         print("Unable to locate Windows Kits binaries.", file=sys.stderr)
         sys.exit(2)

@@ -1,0 +1,99 @@
+name: 'Build Windows ARM64 (MSIX)'
+
+on: [push, pull_request, workflow_dispatch]
+
+env:
+  FORCE_COLOR: 1
+  PIP_DISABLE_PIP_VERSION_CHECK: true
+  PIP_NO_INPUT: true
+  PIP_PROGRESS_BAR: off
+  PIP_REQUIRE_VIRTUALENV: false
+  PIP_VERBOSE: true
+  PYMSBUILD_VERBOSE: true
+
+permissions: {}
+
+jobs:
+  build-arm64:
+    # Windows 11 Arm64 image with Visual Studio 2026 (public preview).
+    # See https://github.com/actions/runner-images/issues/14225
+    runs-on: windows-11-vs2026-arm
+
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        persist-credentials: false
+
+    - name: 'Remove existing PyManager install'
+      run: |
+        $msix = Get-AppxPackage PythonSoftwareFoundation.PythonManager -EA SilentlyContinue
+        if ($msix) {
+          "Removing $($msix.Name)"
+          Remove-AppxPackage $msix
+        }
+      shell: powershell
+
+    # We move faster than the runner image's bundled Python, so use NuGet.
+    - name: Set up NuGet
+      uses: nuget/setup-nuget@b26b823c478ee115be5c9403e62c90b0bf943843 # v3.1.0
+
+    # pythonarm64 provides the native ARM64 interpreter, which makes pymsbuild
+    # default to building ARM64 binaries (wheel tag cpXY-cpXY-win_arm64).
+    - name: Set up Python 3.14.6 (ARM64)
+      run: |
+        nuget install pythonarm64 -Version 3.14.6 -x -o .
+        $py = Get-Item pythonarm64\tools
+        Write-Host "Adding $py to PATH"
+        "$py" | Out-File $env:GITHUB_PATH -Encoding UTF8 -Append
+      working-directory: ${{ runner.temp }}
+
+    - name: Check Python is 3.14.6 ARM64
+      run: >
+        python -c "import sys, platform;
+        print(sys.version);
+        print(sys.executable);
+        print(platform.machine());
+        sys.exit(0 if sys.version_info[:5] == (3, 14, 6, 'final', 0)
+        and platform.machine().upper() == 'ARM64' else 1)"
+
+    - name: Install build dependencies
+      run: python -m pip install "pymsbuild==1.2.2"
+
+    - name: 'Build package'
+      run: python make.py
+      env:
+        PYMSBUILD_TEMP_DIR: ${{ runner.temp }}/bin
+        PYMSBUILD_DIST_DIR: ${{ runner.temp }}/dist
+        PYMSBUILD_LAYOUT_DIR: ${{ runner.temp }}/layout
+
+    - name: 'Build MSIX package'
+      run: python make-msix.py
+      env:
+        PYMSBUILD_TEMP_DIR: ${{ runner.temp }}/bin
+        PYMSBUILD_DIST_DIR: ${{ runner.temp }}/dist
+        PYMSBUILD_LAYOUT_DIR: ${{ runner.temp }}/layout
+
+    - name: 'Verify MSIX targets ARM64'
+      run: |
+        $manifest = Join-Path $env:PYMSBUILD_LAYOUT_DIR "python-manager\appxmanifest.xml"
+        [xml]$xml = Get-Content $manifest
+        $arch = $xml.Package.Identity.ProcessorArchitecture
+        Write-Host "ProcessorArchitecture = $arch"
+        if ($arch -ne "arm64") {
+          Write-Error "Expected arm64 MSIX, got '$arch'"
+          exit 1
+        }
+        Get-ChildItem "$env:PYMSBUILD_DIST_DIR\*.msix" | Format-Table Name, Length -AutoSize
+      env:
+        PYMSBUILD_DIST_DIR: ${{ runner.temp }}/dist
+        PYMSBUILD_LAYOUT_DIR: ${{ runner.temp }}/layout
+      shell: powershell
+
+    - name: 'Upload MSIX artifact'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: python-manager-arm64-msix
+        path: |
+          ${{ runner.temp }}/dist/*.msix
+          ${{ runner.temp }}/dist/*.appinstaller
+        if-no-files-found: error

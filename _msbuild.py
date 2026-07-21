@@ -6,15 +6,35 @@ from pymsbuild.dllpack import *
 
 DLL_NAME = "python{0.major}{0.minor}".format(sys.version_info)
 VER_NUM = "{0.major}.{0.minor}.{0.micro}".format(sys.version_info)
-EMBED_URL = f"https://www.python.org/ftp/python/{VER_NUM}/python-{VER_NUM}-embed-amd64.zip"
+
+# Maps the platform portion of a wheel tag to the python.org embeddable distro
+# suffix and the matching MSIX ProcessorArchitecture value.
+_TARGET_ARCH = {
+    "win_amd64": ("amd64", "x64"),
+    "win_arm64": ("arm64", "arm64"),
+    "win32": ("win32", "x86"),
+}
+
+
+def _tag_arch(tag):
+    """Return (embed_suffix, appx_arch) for a wheel tag, or None if unknown."""
+    return _TARGET_ARCH.get((tag or "").rpartition("-")[2])
+
+
+def embed_url(tag):
+    """URL of the python.org embeddable distro matching the build target."""
+    arch = _tag_arch(tag)
+    suffix = arch[0] if arch else "amd64"
+    return f"https://www.python.org/ftp/python/{VER_NUM}/python-{VER_NUM}-embed-{suffix}.zip"
+
 
 def can_embed(tag):
-    """Return False if tag doesn't match DLL_NAME and EMBED_URL.
-    This is used for validation at build time, we don't currently handle
-    requesting a different build target."""
-    return tag == "cp{0.major}{0.minor}-cp{0.major}{0.minor}-win_amd64".format(
-        sys.version_info
-    )
+    """Return False if we can't bundle an embeddable distro for tag.
+    The interpreter/ABI portion must match the host Python we build the
+    extension modules against, and the platform must be one python.org
+    publishes an embeddable distro for."""
+    prefix = "cp{0.major}{0.minor}-cp{0.major}{0.minor}-".format(sys.version_info)
+    return tag.startswith(prefix) and _tag_arch(tag) is not None
 
 
 METADATA = {
@@ -411,11 +431,14 @@ def init_PACKAGE(tag=None):
     appx_publisher = os.getenv("PYMANAGER_APPX_PUBLISHER", "CN=00000000-0000-0000-0000-000000000000")
     appx_url = os.getenv("PYMANAGER_PUBLISH_URL", "https://example.com").rstrip("/")
     appx_filename = f"python-manager-{METADATA['Version']}.msix"
+    arch = _tag_arch(tag)
+    appx_arch = arch[1] if arch else "x64"
 
     appx_xml = tmpdir / "appxmanifest.xml"
     _patch_appx_identity(PACKAGE.find("appxmanifest.xml").source, appx_xml,
         Version=appx_version,
         Publisher=os.getenv("PYMANAGER_APPX_PUBLISHER"),
+        ProcessorArchitecture=appx_arch,
     )
     PACKAGE.find("appxmanifest.xml").source = appx_xml
 
@@ -428,6 +451,7 @@ def init_PACKAGE(tag=None):
         Publisher=appx_publisher,
         Url=appx_url,
         Filename=appx_filename,
+        ProcessorArchitecture=appx_arch,
     )
     PACKAGE.find("pymanager.appinstaller").source = appinstaller
 
@@ -458,8 +482,9 @@ def init_PACKAGE(tag=None):
         from zipfile import ZipFile
         package = tmpdir / tag / "package.zip"
         package.parent.mkdir(exist_ok=True, parents=True)
-        print("Downloading", EMBED_URL)
-        urlretrieve(EMBED_URL, package)
+        url = embed_url(tag)
+        print("Downloading", url)
+        urlretrieve(url, package)
         with ZipFile(package) as zf:
             for f in [*embed_files, *runtime_files]:
                 f.write_bytes(zf.read(f.name))
