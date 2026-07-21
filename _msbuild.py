@@ -81,6 +81,7 @@ OPTIMIZE_LINK = ItemDefinition('Link',
     LinkTimeCodeGeneration=ConditionalValue('UseLinkTimeCodeGeneration', condition=_RELEASE_ONLY),
     OptimizeReferences=ConditionalValue('true', condition=_RELEASE_ONLY),
     EnableCOMDATFolding=ConditionalValue('true', condition=_RELEASE_ONLY),
+    GenerateDebugInformation=ConditionalValue('false', condition=_RELEASE_ONLY),
 )
 
 
